@@ -1,13 +1,18 @@
 package com.example.codelabs_vision_sef;
 
+import android.content.ContentResolver;
 import android.content.Context;
+import android.content.Intent;
 import android.content.res.AssetManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.os.Bundle;
 
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
 
+import android.util.Log;
 import android.util.Pair;
 import android.view.View;
 import android.widget.AdapterView;
@@ -27,6 +32,7 @@ import com.google.mlkit.vision.text.TextRecognition;
 import com.google.mlkit.vision.text.TextRecognizer;
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Comparator;
@@ -58,18 +64,7 @@ public class MainActivity extends AppCompatActivity implements AdapterView.OnIte
     private static final int DIM_IMG_SIZE_X = 224;
     private static final int DIM_IMG_SIZE_Y = 224;
 
-    private final PriorityQueue<Map.Entry<String, Float>> sortedLabels =
-            new PriorityQueue<>(
-                    RESULTS_TO_SHOW,
-                    new Comparator<Map.Entry<String, Float>>() {
-                        @Override
-                        public int compare(Map.Entry<String, Float> o1, Map.Entry<String, Float>
-                                o2) {
-                            return (o1.getValue()).compareTo(o2.getValue());
-                        }
-                    });
-    /* Preallocated buffers for storing image data. */
-    private final int[] intValues = new int[DIM_IMG_SIZE_X * DIM_IMG_SIZE_Y];
+    private ActivityResultLauncher<String> mGetImage;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -95,12 +90,27 @@ public class MainActivity extends AppCompatActivity implements AdapterView.OnIte
             }
         });
         Spinner dropdown = findViewById(R.id.spinner);
-        String[] items = new String[]{"Test Image 1 (Text)", "Test Image 2 (Face)", "Art and Artist",
-                                        "Kubrick", "Tarantino", "Diversity", "Steve Jobs", "Dawkins"};
+        String[] items = new String[]{"Test Image 1 (Text)", "Test Image 2 (Face)", "Open local image file"};
         ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout
                 .simple_spinner_dropdown_item, items);
         dropdown.setAdapter(adapter);
         dropdown.setOnItemSelectedListener(this);
+
+        mGetImage = registerForActivityResult(new ActivityResultContracts.GetContent(), uri -> {
+            if(uri != null){
+                try {
+                    ContentResolver content = getContentResolver();
+                    mSelectedImage = BitmapFactory.decodeStream(content.openInputStream(uri));
+
+                    // Get the dimensions of the View
+                    Pair<Integer, Integer> viewSize = getTargetedWidthHeight();
+                    mSelectedImage = resizeBitmap(mSelectedImage, viewSize);
+                    mImageView.setImageBitmap(mSelectedImage);
+                } catch (FileNotFoundException e) {
+                    Log.e("Decode Image", "************************* "+e.toString());
+                }
+            }
+        });
     }
 
     private void runTextRecognition() {
@@ -229,6 +239,7 @@ public class MainActivity extends AppCompatActivity implements AdapterView.OnIte
     }
 
     public void onItemSelected(AdapterView<?> parent, View v, int position, long id) {
+        Log.v("Spinner", "Selected item index: "+position);
         mGraphicOverlay.clear();
         switch (position) {
             case 0:
@@ -239,49 +250,39 @@ public class MainActivity extends AppCompatActivity implements AdapterView.OnIte
                 mSelectedImage = getBitmapFromAsset(this, "grace_hopper.jpg");
                 break;
             case 2:
-                mSelectedImage = getBitmapFromAsset(this, "E2YJWjBWQAMKRKP.jpeg");
-                break;
-            case 3:
-                mSelectedImage = getBitmapFromAsset(this, "Kubrick_by_princendymion.jpg");
-                break;
-            case 4:
-                mSelectedImage = getBitmapFromAsset(this, "the_director__s_directives_by_yannickbouchard-d3kgqdr.jpg");
-                break;
-            case 5:
-                mSelectedImage = getBitmapFromAsset(this, "tumblr_kssxkp0084.jpg");
-                break;
-            case 6:
-                mSelectedImage = getBitmapFromAsset(this, "tumblr_lqgt249Xbd1qzu69xo1_400.jpg");
-                break;
-            case 7:
-                mSelectedImage = getBitmapFromAsset(this, "tumblr_lr2mb5NWGd1qdbqz9o1_400.jpg");
+                //Open new local file
+                requestOpenImage();
                 break;
             default:
-                mSelectedImage = getBitmapFromAsset(this, "grace_hopper.jpg");
+                //Open new local file
+                requestOpenImage();
         }
         if (mSelectedImage != null) {
             // Get the dimensions of the View
-            Pair<Integer, Integer> targetedSize = getTargetedWidthHeight();
-
-            int targetWidth = targetedSize.first;
-            int maxHeight = targetedSize.second;
-
-            // Determine how much to scale down the image
-            float scaleFactor =
-                    Math.max(
-                            (float) mSelectedImage.getWidth() / (float) targetWidth,
-                            (float) mSelectedImage.getHeight() / (float) maxHeight);
-
-            Bitmap resizedBitmap =
-                    Bitmap.createScaledBitmap(
-                            mSelectedImage,
-                            (int) (mSelectedImage.getWidth() / scaleFactor),
-                            (int) (mSelectedImage.getHeight() / scaleFactor),
-                            true);
-
-            mImageView.setImageBitmap(resizedBitmap);
-            mSelectedImage = resizedBitmap;
+            Pair<Integer, Integer> viewSize = getTargetedWidthHeight();
+            mSelectedImage = resizeBitmap(mSelectedImage, viewSize);
+            mImageView.setImageBitmap(mSelectedImage);
         }
+    }
+
+    public static Bitmap resizeBitmap(Bitmap imageToResize, Pair<Integer, Integer> targetedSize){
+        int targetWidth = targetedSize.first;
+        int maxHeight = targetedSize.second;
+
+        // Determine how much to scale down the image
+        float scaleFactor =
+                Math.max(
+                        (float) imageToResize.getWidth() / (float) targetWidth,
+                        (float) imageToResize.getHeight() / (float) maxHeight);
+
+        Bitmap resizedBitmap =
+                Bitmap.createScaledBitmap(
+                        imageToResize,
+                        (int) (imageToResize.getWidth() / scaleFactor),
+                        (int) (imageToResize.getHeight() / scaleFactor),
+                        true);
+
+        return resizedBitmap;
     }
 
     @Override
@@ -302,5 +303,18 @@ public class MainActivity extends AppCompatActivity implements AdapterView.OnIte
         }
 
         return bitmap;
+    }
+
+    public void requestOpenImage(){
+        /* Old Intent code
+        //Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.putExtra(Intent.EXTRA_LOCAL_ONLY, true);
+        intent.setType("image/*");
+        startActivityForResult(intent, 0);
+        */
+
+        mGetImage.launch("image/*");
     }
 }
